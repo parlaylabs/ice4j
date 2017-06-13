@@ -45,7 +45,7 @@ public class RateStatistics
     /**
      * Oldest time recorded in buckets.
      */
-    private long oldestTime;
+    private long oldestTime = -1000;
 
     /**
      * To convert counts/ms to desired units.
@@ -69,14 +69,18 @@ public class RateStatistics
      * example, if counts represents bytes, use <tt>8*1000</tt> to go to bits/s.
      */
     public RateStatistics(int windowSizeMs, float scale)
-    { 
+    {
         buckets = new long[windowSizeMs + 1]; // N ms in (N+1) buckets.
-        this.scale = scale / (buckets.length - 1);
+        this.scale = scale;// / (buckets.length - 1);
     }
 
     private synchronized void eraseOld(long nowMs)
     {
+        if (!isInitialized())
+          return;
         long newOldestTime = nowMs - buckets.length + 1;
+
+        System.out.printf("[RS] newOldestTime: %d oldestTime: %d\n", newOldestTime, oldestTime);
 
         if (newOldestTime <= oldestTime)
             return;
@@ -109,8 +113,21 @@ public class RateStatistics
 
     public long getRate(long nowMs)
     {
+        System.out.printf("[RS] 1- accumulatedCount: %d\n", accumulatedCount);
         eraseOld(nowMs);
-        return (long) (accumulatedCount * scale + 0.5F);
+        System.out.printf("[RS] 2- accumulatedCount: %d\n", accumulatedCount);
+        long activeWindowSize = nowMs - oldestTime + 1;
+
+        if (accumulatedCount == 0 || activeWindowSize <= 1 ||
+            (accumulatedCount <= 1 && activeWindowSize < (buckets.length - 1))) {
+              return -1;
+        }
+
+        double adaptiveScale = (double)scale / activeWindowSize;
+
+        System.out.printf("[RS] pass: %d scale: %f scale_: %f active_window_size: %d\n", accumulatedCount, adaptiveScale, scale, activeWindowSize);
+
+        return (long) (accumulatedCount * adaptiveScale + 0.5F);
     }
 
     public long getAccumulatedCount()
@@ -124,11 +141,20 @@ public class RateStatistics
         return accumulatedCount;
     }
 
+    private boolean isInitialized() {
+      return oldestTime != -1000;
+    }
+
 
     public void update(int count, long nowMs)
     {
+        System.out.printf("[RS] count: %d nowMs: %d oldestTime: %d\n", count, nowMs, oldestTime);
         if (nowMs < oldestTime) // Too old data is ignored.
             return;
+
+        if (!isInitialized()) {
+          oldestTime = nowMs;
+        }
 
         synchronized (this)
         {
