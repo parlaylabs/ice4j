@@ -110,6 +110,8 @@ public class MappingCandidateHarvester
 
         for (Candidate<?> cand : component.getLocalCandidates())
         {
+        	logger.info("harvesting with local candidates: " + cand);
+        	
             if (!(cand instanceof HostCandidate)
                 || !cand.getTransportAddress().getHostAddress()
                             .equals(face.getHostAddress())

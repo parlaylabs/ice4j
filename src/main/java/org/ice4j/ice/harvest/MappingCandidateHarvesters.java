@@ -158,6 +158,7 @@ public class MappingCandidateHarvesters
             (forceAwsHarvester || AwsCandidateHarvester.smellsLikeAnEC2()))
         {
             harvesterList.add(new AwsCandidateHarvester());
+            harvesterList.add(new AwsIPv6CandidateHarvester());
         }
 
         // STUN harvesters
