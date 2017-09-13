@@ -52,6 +52,9 @@ public class RateStatistics
      */
     private final float scale;
 
+    private final int maxWindowSizeMs;
+    private final boolean isAdaptive;
+
     /**
      * Initializes a new {@link RateStatistics} instance with a default scale
      * of 8000 (i.e. if the input is in bytes, the result will be in bits per
@@ -69,17 +72,44 @@ public class RateStatistics
      * example, if counts represents bytes, use <tt>8*1000</tt> to go to bits/s.
      */
     public RateStatistics(int windowSizeMs, float scale)
-    { 
+    {
+        this(windowSizeMs, scale, false);
+    }
+
+    /**
+     * @param windowSizeMs window size in ms for the rate estimation
+     * @param scale coefficient to convert counts/ms to desired units. For
+     * @param isAdaptive enabled the adaptive rate statistic calculations
+     * which provides a smoother calculation
+     * example, if counts represents bytes, use <tt>8*1000</tt> to go to bits/s.
+     */
+    public RateStatistics(int windowSizeMs, float scale, boolean isAdaptive)
+    {
         buckets = new long[windowSizeMs + 1]; // N ms in (N+1) buckets.
-        this.scale = scale / (buckets.length - 1);
+        this.isAdaptive = isAdaptive;
+        if (isAdaptive)
+        {
+            this.scale = scale;
+        } else
+        {
+            this.scale = scale / (buckets.length - 1);
+        }
+        this.maxWindowSizeMs = windowSizeMs;
+        this.oldestTime = -this.maxWindowSizeMs;
     }
 
     private synchronized void eraseOld(long nowMs)
     {
+        if (!isInitialized())
+        {
+          return;
+        }
         long newOldestTime = nowMs - buckets.length + 1;
 
         if (newOldestTime <= oldestTime)
+        {
             return;
+        }
 
         while (oldestTime < newOldestTime)
         {
@@ -110,7 +140,21 @@ public class RateStatistics
     public long getRate(long nowMs)
     {
         eraseOld(nowMs);
-        return (long) (accumulatedCount * scale + 0.5F);
+        if (!isAdaptive)
+        {
+            return (long) (accumulatedCount * scale + 0.5F);
+        }
+        long activeWindowSize = nowMs - oldestTime + 1;
+
+        if (accumulatedCount == 0 || activeWindowSize <= 1 ||
+            (accumulatedCount <= 1 && activeWindowSize < (buckets.length - 1)))
+        {
+              return -1;
+        }
+
+        double adaptiveScale = (double)scale / activeWindowSize;
+
+        return (long) (accumulatedCount * adaptiveScale + 0.5F);
     }
 
     public long getAccumulatedCount()
@@ -124,11 +168,23 @@ public class RateStatistics
         return accumulatedCount;
     }
 
+    private boolean isInitialized()
+    {
+      return oldestTime != -maxWindowSizeMs;
+    }
+
 
     public void update(int count, long nowMs)
     {
-        if (nowMs < oldestTime) // Too old data is ignored.
+        if (nowMs < oldestTime)
+        {   // Too old data is ignored.
             return;
+        }
+
+        if (!isInitialized())
+        {
+          oldestTime = nowMs;
+        }
 
         synchronized (this)
         {
@@ -138,7 +194,9 @@ public class RateStatistics
             int index = oldestIndex + nowOffset;
 
             if (index >= buckets.length)
+            {
                 index -= buckets.length;
+            }
             buckets[index] += count;
             accumulatedCount += count;
         }
